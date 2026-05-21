@@ -1,0 +1,34 @@
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Virtual environment
+venv/
+.venv/
+
+# Mac files
+.DS_Store
+
+# VS Code
+.vscode/
+
+# Dataset files - GitHub'a büyük görselleri atma
+data/raw/
+data/processed/
+dataset/train/
+dataset/val/
+
+# Model outputs
+outputs/models/
+outputs/*.pth
+outputs/*.pt
+outputs/*.onnx
+outputs/*.pkl
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Environment variables
+.env
