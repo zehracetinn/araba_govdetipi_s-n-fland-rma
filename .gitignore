@@ -1,34 +1,29 @@
-# Python cache
+# Python
+venv/
 __pycache__/
 *.pyc
 *.pyo
 *.pyd
 
-# Virtual environment
-venv/
-.venv/
-
-# Mac files
+# Mac
 .DS_Store
 
-# VS Code
-.vscode/
+# Dataset ve görseller
+dataset/
+downloads/
+Cars_Body_Type/
+stanford_archive/
 
-# Dataset files - GitHub'a büyük görselleri atma
-data/raw/
-data/processed/
-dataset/train/
-dataset/val/
+# Model çıktıları
+outputs/
+*.pth
+*.pt
+*.onnx
+*.pkl
 
-# Model outputs
-outputs/models/
-outputs/*.pth
-outputs/*.pt
-outputs/*.onnx
-outputs/*.pkl
-
-# Jupyter
+# Notebook checkpoint
 .ipynb_checkpoints/
 
-# Environment variables
-.env
+# Kaggle token varsa asla git'e atma
+kaggle.json
+.kaggle/
