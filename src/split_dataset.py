@@ -11,7 +11,7 @@ VAL_RATIO = 0.20
 RANDOM_SEED = 42
 
 # Her sınıftan maksimum kaç görsel kullanılacak?
-MAX_IMAGES_PER_CLASS = 500
+MAX_IMAGES_PER_CLASS = 700
 
 # Bu sayının altındaki sınıflarda uyarı vereceğiz
 MIN_IMAGES_WARNING = 250

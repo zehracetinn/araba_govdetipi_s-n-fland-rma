@@ -1,11 +1,12 @@
 import json
 import time
-from pathlib import Path
 
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
 import torch.nn as nn
+from PIL import Image
+from sklearn.metrics import f1_score
 from torch.utils.data import DataLoader
 from torchvision import datasets, transforms
 
@@ -24,14 +25,17 @@ from config import (
 from model import create_model
 
 
-def get_device():
+def pil_loader_rgb(path):
     """
-    Eğitim için uygun cihazı seçer.
-    Mac'te MPS varsa onu kullanır.
-    NVIDIA GPU varsa CUDA kullanır.
-    Yoksa CPU kullanır.
+    Tüm görselleri RGB formatına çevirir.
+    Böylece PNG/transparency kaynaklı PIL uyarıları ve kanal sorunları azalır.
     """
+    with open(path, "rb") as file:
+        image = Image.open(file)
+        return image.convert("RGB")
 
+
+def get_device():
     if torch.backends.mps.is_available():
         return torch.device("mps")
 
@@ -44,17 +48,25 @@ def get_device():
 def get_transforms():
     """
     Train tarafında augmentation uygulanır.
-    Validation tarafında augmentation uygulanmaz.
+    Validation tarafında gerçek test koşuluna daha yakın sade preprocessing yapılır.
     """
 
     train_transform = transforms.Compose([
-        transforms.RandomResizedCrop(IMAGE_SIZE, scale=(0.75, 1.0)),
+        transforms.RandomResizedCrop(
+            IMAGE_SIZE,
+            scale=(0.70, 1.00),
+            ratio=(0.75, 1.33)
+        ),
         transforms.RandomHorizontalFlip(p=0.5),
-        transforms.RandomRotation(degrees=10),
+        transforms.RandomAffine(
+            degrees=8,
+            translate=(0.05, 0.05),
+            scale=(0.90, 1.10)
+        ),
         transforms.ColorJitter(
-            brightness=0.2,
-            contrast=0.2,
-            saturation=0.2
+            brightness=0.20,
+            contrast=0.20,
+            saturation=0.20
         ),
         transforms.ToTensor(),
         transforms.Normalize(
@@ -77,18 +89,17 @@ def get_transforms():
 
 
 def calculate_class_weights(dataset, num_classes):
-    """
-    Sınıf dengesizliğini azaltmak için class weight hesaplar.
-
-    STATION_WAGON sınıfı diğerlerinden az olduğu için,
-    loss fonksiyonunda bu sınıfa biraz daha fazla önem verilmesini sağlar.
-    """
-
     targets = [sample[1] for sample in dataset.samples]
     class_counts = np.bincount(targets, minlength=num_classes)
 
     total_samples = len(targets)
-    class_weights = total_samples / (num_classes * class_counts)
+
+    class_weights = []
+    for count in class_counts:
+        if count == 0:
+            class_weights.append(0.0)
+        else:
+            class_weights.append(total_samples / (num_classes * count))
 
     return torch.tensor(class_weights, dtype=torch.float32), class_counts
 
@@ -131,6 +142,9 @@ def validate_one_epoch(model, dataloader, criterion, device):
     correct_predictions = 0
     total_samples = 0
 
+    all_labels = []
+    all_predictions = []
+
     with torch.no_grad():
         for images, labels in dataloader:
             images = images.to(device)
@@ -145,10 +159,20 @@ def validate_one_epoch(model, dataloader, criterion, device):
             correct_predictions += (predictions == labels).sum().item()
             total_samples += labels.size(0)
 
+            all_labels.extend(labels.cpu().numpy().tolist())
+            all_predictions.extend(predictions.cpu().numpy().tolist())
+
     epoch_loss = running_loss / total_samples
     epoch_accuracy = correct_predictions / total_samples
 
-    return epoch_loss, epoch_accuracy
+    macro_f1 = f1_score(
+        all_labels,
+        all_predictions,
+        average="macro",
+        zero_division=0
+    )
+
+    return epoch_loss, epoch_accuracy, macro_f1
 
 
 def save_training_curves(history):
@@ -176,6 +200,15 @@ def save_training_curves(history):
     plt.savefig(OUTPUT_DIR / "accuracy_curve.png", dpi=300, bbox_inches="tight")
     plt.close()
 
+    plt.figure()
+    plt.plot(epochs, history["val_macro_f1"], label="Validation Macro F1")
+    plt.xlabel("Epoch")
+    plt.ylabel("Macro F1-Score")
+    plt.title("Validation Macro F1-Score")
+    plt.legend()
+    plt.savefig(OUTPUT_DIR / "macro_f1_curve.png", dpi=300, bbox_inches="tight")
+    plt.close()
+
 
 def main():
     start_time = time.time()
@@ -189,12 +222,14 @@ def main():
 
     train_dataset = datasets.ImageFolder(
         root=TRAIN_DIR,
-        transform=train_transform
+        transform=train_transform,
+        loader=pil_loader_rgb
     )
 
     val_dataset = datasets.ImageFolder(
         root=VAL_DIR,
-        transform=val_transform
+        transform=val_transform,
+        loader=pil_loader_rgb
     )
 
     class_names = train_dataset.classes
@@ -235,7 +270,10 @@ def main():
 
     class_weights = class_weights.to(device)
 
-    criterion = nn.CrossEntropyLoss(weight=class_weights)
+    criterion = nn.CrossEntropyLoss(
+        weight=class_weights,
+        label_smoothing=0.05
+    )
 
     optimizer = torch.optim.AdamW(
         model.parameters(),
@@ -254,10 +292,11 @@ def main():
         "train_loss": [],
         "val_loss": [],
         "train_acc": [],
-        "val_acc": []
+        "val_acc": [],
+        "val_macro_f1": []
     }
 
-    best_val_loss = float("inf")
+    best_macro_f1 = 0.0
     patience = 5
     patience_counter = 0
 
@@ -275,7 +314,7 @@ def main():
             device
         )
 
-        val_loss, val_acc = validate_one_epoch(
+        val_loss, val_acc, val_macro_f1 = validate_one_epoch(
             model,
             val_loader,
             criterion,
@@ -288,12 +327,14 @@ def main():
         history["val_loss"].append(val_loss)
         history["train_acc"].append(train_acc)
         history["val_acc"].append(val_acc)
+        history["val_macro_f1"].append(val_macro_f1)
 
         print(f"Train Loss: {train_loss:.4f} | Train Acc: {train_acc:.4f}")
         print(f"Val Loss:   {val_loss:.4f} | Val Acc:   {val_acc:.4f}")
+        print(f"Val Macro F1-Score: {val_macro_f1:.4f}")
 
-        if val_loss < best_val_loss:
-            best_val_loss = val_loss
+        if val_macro_f1 > best_macro_f1:
+            best_macro_f1 = val_macro_f1
             patience_counter = 0
 
             torch.save(
@@ -301,12 +342,13 @@ def main():
                     "model_state_dict": model.state_dict(),
                     "class_names": class_names,
                     "image_size": IMAGE_SIZE,
-                    "model_name": "efficientnet_b0"
+                    "model_name": "efficientnet_b0",
+                    "best_macro_f1": best_macro_f1
                 },
                 MODEL_PATH
             )
 
-            print("En iyi model kaydedildi.")
+            print("En iyi Macro F1 model kaydedildi.")
         else:
             patience_counter += 1
             print(f"EarlyStopping sayacı: {patience_counter}/{patience}")
@@ -325,6 +367,7 @@ def main():
 
     elapsed_time = time.time() - start_time
     print(f"Eğitim tamamlandı. Süre: {elapsed_time / 60:.2f} dakika")
+    print(f"En iyi Macro F1: {best_macro_f1:.4f}")
     print(f"Model kaydedildi: {MODEL_PATH}")
     print(f"Grafikler kaydedildi: {OUTPUT_DIR}")
 
