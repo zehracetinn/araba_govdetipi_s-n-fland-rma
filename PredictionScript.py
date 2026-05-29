@@ -2,8 +2,21 @@ from pathlib import Path
 
 import torch
 import torch.nn as nn
-from PIL import Image
+from PIL import Image, ImageOps
 from torchvision import models, transforms
+
+
+# Eğitimdeki letterbox ile birebir aynı: aracın tamamını oranı bozmadan
+# 224x224 tuvale ortalayıp gri kenar dolgusu uygular (kırpma yok).
+PAD_COLOR = (124, 116, 104)
+
+
+class CenterLetterbox:
+    def __init__(self, size):
+        self.size = size
+
+    def __call__(self, img):
+        return ImageOps.pad(img, (self.size, self.size), color=PAD_COLOR)
 
 
 IMAGE_SIZE = 224
@@ -36,15 +49,15 @@ def get_device():
 
 def create_model(num_classes):
     """
-    Eğitimde kullandığımız EfficientNet-B0 mimarisinin aynısı.
+    Eğitimde kullandığımız MobileNetV3-Large mimarisinin aynısı.
     Burada weights=None kullanıyoruz çünkü eğitilmiş ağırlıkları best_model.pth içinden yüklüyoruz.
     """
 
-    model = models.efficientnet_b0(weights=None)
+    model = models.mobilenet_v3_large(weights=None)
 
-    in_features = model.classifier[1].in_features
+    in_features = model.classifier[3].in_features
 
-    model.classifier = nn.Sequential(
+    model.classifier[3] = nn.Sequential(
         nn.Dropout(p=0.3),
         nn.Linear(in_features, num_classes)
     )
@@ -59,8 +72,7 @@ def get_transform():
     """
 
     return transforms.Compose([
-        transforms.Resize(256),
-        transforms.CenterCrop(IMAGE_SIZE),
+        CenterLetterbox(IMAGE_SIZE),
         transforms.ToTensor(),
         transforms.Normalize(
             mean=[0.485, 0.456, 0.406],

@@ -15,12 +15,15 @@ from sklearn.metrics import (
 from torchvision import datasets, transforms
 
 from config import (
+    TEST_DIR,
     VAL_DIR,
     OUTPUT_DIR,
     MODEL_PATH,
     IMAGE_SIZE
 )
 from model import create_model
+from logging_utils import setup_logging
+from transforms_utils import CenterLetterbox
 
 
 OFFICIAL_LABEL_MAP = {
@@ -57,9 +60,9 @@ def get_device():
 
 
 def get_val_transform():
+    # Eğitimle birebir aynı: letterbox (tüm araç görünür, oran korunur).
     return transforms.Compose([
-        transforms.Resize(256),
-        transforms.CenterCrop(IMAGE_SIZE),
+        CenterLetterbox(IMAGE_SIZE),
         transforms.ToTensor(),
         transforms.Normalize(
             mean=[0.485, 0.456, 0.406],
@@ -112,6 +115,7 @@ def save_normalized_confusion_matrix(y_true, y_pred):
 
 
 def main():
+    setup_logging("evaluate")
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
     device = get_device()
@@ -123,8 +127,13 @@ def main():
     for index, class_name in enumerate(model_class_names):
         print(f"{index}: {class_name}")
 
+    # Değerlendirme ayrı test setinde yapılır (modelin hiç eğitilmediği veri).
+    # Test seti yoksa val setine düşer.
+    eval_dir = TEST_DIR if TEST_DIR.exists() else VAL_DIR
+    print(f"\nDeğerlendirme seti: {eval_dir}")
+
     val_dataset = datasets.ImageFolder(
-        root=VAL_DIR,
+        root=eval_dir,
         transform=get_val_transform()
     )
 

@@ -22,7 +22,9 @@ from config import (
     LEARNING_RATE,
 )
 
-from model import create_model
+from model import create_model, MODEL_NAME
+from logging_utils import setup_logging
+from transforms_utils import CenterLetterbox, RandomLetterbox
 
 
 def pil_loader_rgb(path):
@@ -48,26 +50,33 @@ def get_device():
 def get_transforms():
     """
     Train tarafında augmentation uygulanır.
-    Validation tarafında gerçek test koşuluna daha yakın sade preprocessing yapılır.
+    Validation tarafında inference (arayüz/PredictionScript) ile birebir
+    aynı sade preprocessing yapılır.
+
+    ÖNEMLİ - genelleme düzeltmesi:
+    Veri setinde sedanlar hep geniş çerçeveli (en-boy ~2.4), wagonlar
+    kareye yakın (~1.6). Bu yüzden eski model "geniş çerçeve = sedan"
+    gibi sahte bir kısayol öğrenip gerçek fotoğraflarda sedanları wagon
+    sanıyordu. Bunu kırmak için:
+      - RandomResizedCrop ratio aralığı çok geniş tutuldu: (0.5, 2.0).
+        Böylece model aynı aracı hem geniş hem kare çerçevede görür ve
+        çerçeve oranını sınıf ipucu olarak kullanamaz.
+      - Inference tarafında CenterCrop YERİNE doğrudan (224x224) resize
+        kullanıyoruz; böylece aracın ön/arka (bagaj) kısmı kesilmez ve
+        tüm araç modele gösterilir.
     """
 
     train_transform = transforms.Compose([
-        transforms.RandomResizedCrop(
-            IMAGE_SIZE,
-            scale=(0.70, 1.00),
-            ratio=(0.75, 1.33)
-        ),
         transforms.RandomHorizontalFlip(p=0.5),
-        transforms.RandomAffine(
-            degrees=8,
-            translate=(0.05, 0.05),
-            scale=(0.90, 1.10)
-        ),
         transforms.ColorJitter(
-            brightness=0.20,
-            contrast=0.20,
-            saturation=0.20
+            brightness=0.25,
+            contrast=0.25,
+            saturation=0.25
         ),
+        # Aracın tamamını (arka dahil) koruyarak rastgele boyut/konumda yerleştir.
+        # Crop YOK -> sedan/wagon ve suv/pickup ayrımı için arka kısım hep görünür.
+        RandomLetterbox(IMAGE_SIZE, min_scale=0.6, max_scale=1.0),
+        transforms.RandomRotation(degrees=8, fill=124),
         transforms.ToTensor(),
         transforms.Normalize(
             mean=[0.485, 0.456, 0.406],
@@ -76,8 +85,7 @@ def get_transforms():
     ])
 
     val_transform = transforms.Compose([
-        transforms.Resize(256),
-        transforms.CenterCrop(IMAGE_SIZE),
+        CenterLetterbox(IMAGE_SIZE),
         transforms.ToTensor(),
         transforms.Normalize(
             mean=[0.485, 0.456, 0.406],
@@ -213,6 +221,7 @@ def save_training_curves(history):
 def main():
     start_time = time.time()
 
+    setup_logging("train")
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
     device = get_device()
@@ -342,7 +351,7 @@ def main():
                     "model_state_dict": model.state_dict(),
                     "class_names": class_names,
                     "image_size": IMAGE_SIZE,
-                    "model_name": "efficientnet_b0",
+                    "model_name": MODEL_NAME,
                     "best_macro_f1": best_macro_f1
                 },
                 MODEL_PATH

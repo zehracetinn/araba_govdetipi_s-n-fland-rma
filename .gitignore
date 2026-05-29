@@ -10,9 +10,13 @@ __pycache__/
 
 # Dataset ve görseller
 dataset/
+data/
 downloads/
 Cars_Body_Type/
 stanford_archive/
+
+# Log dosyaları
+logs/
 
 # Model çıktıları
 outputs/
